@@ -26,6 +26,19 @@
                            Secs::integer(),
                            MicroSecs::integer() | float()).
 
+%-type rep_kind() :: infinite | integer().
+%-record(repetition, {
+%    repetition_kind :: rep_kind(),
+%    repetition_instance :: integer(),
+%    start_timestamp :: timestamp(),
+%    next_repetition :: fun(),
+%    prev_repetition :: fun()
+%}).
+
+%%-spec rep_next(#rep_kind()) -> 
+
+    
+
 %% API
 
 -spec add_time (datetime() | timestamp(), integer(), integer(), integer()) -> datetime().
@@ -330,11 +343,11 @@ apply_months_offset(Datetime, AM) ->
     {{Y,M,D},{H,MM,S}} = Datetime,
     AY = (Y*12)+M+AM,
     Year = (AY div 12),
-    case (AY rem 12) of
-        0 ->Month=12;
-        _ ->Month=(AY rem 12)
-    end,
-    find_last_valid_date({{Year,Month,D},{H,MM,S}}).
+    Month = (AY rem 12),
+    case Month of
+        0 -> find_last_valid_date({{Year,12,D},{H,MM,S}});
+        _ -> find_last_valid_date({{Year,Month,D},{H,MM,S}})
+    end.
 
 -spec apply_days_offset (datetime(), number()) -> datetime().
 %% @doc Add the specified days to `Datetime'.
@@ -403,6 +416,23 @@ is_duration(Duration) ->
 %% @doc Return new list with datetime tuples.
 parse_interval(Bin) when is_binary(Bin) ->
     parse_interval(binary_to_list(Bin));
+%%
+%% (from http://en.wikipedia.org/wiki/ISO_8601#Time_intervals):
+%% Wed Jun 18 21:18:49 UTC 2014
+%% There are four ways to express a time interval:
+%%
+%% Start and end, such as "2007-03-01T13:00:00Z/2008-05-11T15:30:00Z" (2 pieces, both dates)
+%% Start and duration, such as "2007-03-01T13:00:00Z/P1Y2M10DT2H30M" (2 pieces, timestamp and then duration)
+%% Duration and end, such as "P1Y2M10DT2H30M/2008-05-11T15:30:00Z" (2 pieces, time interval and then end)
+%% ** author's note: even the spec itself thinks duration/end is stupid, so this is not implemented
+%% Duration only, such as "P1Y2M10DT2H30M", with additional context information
+%% ** author's note: for the purposes of this library, this is also stupid and not implemented
+%%
+parse_interval(TimeInterval) ->
+  TimeTokens = string:tokens(TimeInterval, "/"),
+
+
+
 parse_interval(TimeInterval)->%"R2/P1Y3M22DT3H/2014-01-01T16:46:45Z"
     Tokens  = string:tokens(TimeInterval, "/"),
     [R,S,E]=case string:substr(TimeInterval,1,1) of
@@ -411,37 +441,44 @@ parse_interval(TimeInterval)->%"R2/P1Y3M22DT3H/2014-01-01T16:46:45Z"
           [Start|Endd] = StartEnd,
           Repeat=list_to_integer(string:substr(RS,2)),
           End=binary_to_list(list_to_binary(Endd)),
-          if
-           End==[]->[Repeat,binary_to_list(format(now())),Start];
-           true->[Repeat,Start,End]
+          io:format("repeat: ~p, End: ~p~n",[Repeat,End]),
+          if 
+            End == [] 
+              -> [Repeat,binary_to_list(format(now())),Start];
+            true
+              ->[Repeat,Start,End]
           end;
      "P"->[End|Startt] = Tokens,
-           Start=binary_to_list(list_to_binary(Startt)),
+           Start = binary_to_list(list_to_binary(Startt)),
           if
-           Start==[]->[1,binary_to_list(format(now())),End];
-           true->[1,Start,End]
+           Start == []
+              -> [1,binary_to_list(format(now())),End];
+           true
+              -> [1,Start,End]
           end;
        _->[Start|Endd] = Tokens,
-           End=binary_to_list(list_to_binary(Endd)),
+           End = binary_to_list(list_to_binary(Endd)),
            if
-           End==[]->[1,binary_to_list(format(now())),Start];
-           true->[1,Start,End]
+            End == [] 
+              -> [1,binary_to_list(format(now())),Start];
+            true
+              -> [1,Start,End]
            end
           end,
       [R,Datetime,Duration]=case is_datetime(S) of
-             true->  case is_datetime(E) of
-                     true->"Can't handle this yet (Date,Date)";
-                     false-> case is_duration(E) of
-                              true->[R,S,E];
-                              false-> error(badarg)
+             true ->  case is_datetime(E) of
+                     true -> "Can't handle this yet (Date,Date)";
+                     false -> case is_duration(E) of
+                              true -> [R,S,E];
+                              false -> error(badarg)
                               end
                      end;
-             false-> case is_duration(S) of
-                     true->  case is_datetime(E) of
-                             true-> [R,E,S];%"Duration Date";
-                             false-> error(badarg)
+             false -> case is_duration(S) of
+                     true ->  case is_datetime(E) of
+                             true -> [R,E,S];%"Duration Date";
+                             false -> error(badarg)
                              end;
-                     false-> error(badarg)
+                     false -> error(badarg)
                      end
           end,
         apply_durations(parse(Datetime),Duration,[],R).
